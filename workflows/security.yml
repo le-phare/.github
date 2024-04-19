@@ -1,0 +1,105 @@
+name: 'Verify vulnerabilities security checks'
+
+on:
+  workflow_call:
+    inputs:
+      composer-continue-on-error:
+        description: 'Allow composer audit to fail'
+        default: false
+        required: false
+        type: boolean
+      enable-composer:
+        description: 'Run composer audit'
+        default: true
+        required: false
+        type: boolean
+      enable-node:
+        description: 'Run npm/yarn audit'
+        default: true
+        required: false
+        type: boolean
+      node-continue-on-error:
+        description: 'Allow npm/yarn audit to fail'
+        default: false
+        required: false
+        type: boolean
+      node-audit-level:
+        description: 'Fail if there are vulnerabilities above or at the specified level. See https://docs.npmjs.com/cli/v10/commands/npm-audit#audit-level'
+        default: 'high'
+        required: false
+        type: string
+      node-use-yarn:
+        description: "Enable to use yarn instead of npm"
+        default: false
+        required: false
+        type: boolean
+      node-version:
+        description: 'NodeJS version'
+        default: 'latest'
+        required: false
+        type: string
+      php-extensions:
+        description: 'PHP extensions'
+        default: ''
+        required: false
+        type: string
+      php-version:
+        description: 'PHP version'
+        default: 'latest'
+        required: false
+        type: string
+
+jobs:
+  composer:
+    if: ${{ inputs.enable-composer }}
+    name: Security check - Composer
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ inputs.composer-continue-on-error }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          extensions: '${{ inputs.php-extensions }}'
+          php-version: '${{ inputs.php-version }}'
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: "${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}"
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist
+
+      - run: composer audit
+
+  node:
+    if: ${{ inputs.enable-node }}
+    name: Security check - NodeJS
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ inputs.node-continue-on-error }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          cache: ${{ inputs.node-use-yarn && 'yarn' || 'npm' }}
+          node-version: '${{ inputs.node-version }}'
+
+      - name: npm audit
+        if: ${{ !inputs.node-use-yarn }}
+        run: "npm audit --audit-level=${{ inputs.node-audit-level }}"
+
+      - name: yarn audit
+        if: ${{ inputs.node-use-yarn }}
+        run: "yarn audit --level ${{ inputs.node-audit-level }}"

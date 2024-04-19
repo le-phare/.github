@@ -1,0 +1,52 @@
+name: 'Ansible deploy'
+
+on:
+  workflow_call:
+    inputs:
+      ansible_inventory_path:
+        description: 'Path to Ansible inventory file'
+        default: ansible/preprod/hosts
+        required: false
+        type: string
+      ansible_playbook_path:
+        description: 'Path to Ansible playbook file'
+        default: ansible/deploy.yml
+        required: false
+        type: string
+
+    secrets:
+      ANSIBLE_VAULT_PASSWORD_FILE:
+        required: true
+      SSH_CONFIG:
+        required: false
+      SSH_KNOWN_HOSTS:
+        required: false
+      SSH_PRIVATE_KEY:
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: [ self-hosted, linux ]
+
+    container:
+      image: lephare/ansible:latest
+      options: >-
+        --user 0:0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ansible - Deploy
+        env:
+          ANSIBLE_ROLES_PATH: /home/ansible/.ansible/roles
+        run: |
+          mkdir -p /root/.ssh/
+          chmod 0700 /root/.ssh/
+          eval $(ssh-agent -s)
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | ssh-add -
+          echo "${{ secrets.SSH_CONFIG }}" >> /etc/ssh/ssh_config
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > /root/.ssh/known_hosts
+          chmod 0400 /root/.ssh/*
+          echo "${{ secrets.ANSIBLE_VAULT_PASSWORD_FILE }}" > vault-password-file
+          ansible-playbook --vault-password-file vault-password-file -i ${{ inputs.ansible_inventory_path }} ${{ inputs.ansible_playbook_path }}

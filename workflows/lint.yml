@@ -1,0 +1,161 @@
+name: 'Lint and analyse code'
+
+on:
+  workflow_call:
+    inputs:
+      enable-eslint:
+        description: 'Lint JavaScript code using ESLint'
+        default: true
+        required: false
+        type: boolean
+      enable-php-cs-fixer:
+        description: 'Lint PHP code using PHP CS Fixer'
+        default: true
+        required: false
+        type: boolean
+      enable-phpstan:
+        description: 'Analyse PHP code using PHPStan'
+        default: true
+        required: false
+        type: boolean
+      eslint-continue-on-error:
+        description: 'Allow ESLint to fail'
+        default: true
+        required: false
+        type: boolean
+      semistandard-file-paths:
+        description: 'Files/directories glob paths to lint using semistandard. See https://github.com/standard/standard#usage'
+        default: 'assets/**/*.js'
+        required: false
+        type: string
+      php-cs-fixer-continue-on-error:
+        description: 'Allow PHP CS Fixer lint to fail'
+        default: true
+        required: false
+        type: boolean
+      phpstan-continue-on-error:
+        description: 'Allow PHPStan analyse to fail'
+        default: false
+        required: false
+        type: boolean
+      node-use-yarn:
+        description: "Enable to use yarn instead of npm"
+        default: false
+        required: false
+        type: boolean
+      node-version:
+        description: 'NodeJS version'
+        default: 'latest'
+        required: false
+        type: string
+      php-extensions:
+        description: 'PHP extensions'
+        default: ''
+        required: false
+        type: string
+      php-version:
+        description: 'PHP version'
+        default: 'latest'
+        required: false
+        type: string
+
+jobs:
+  php-cs-fixer:
+    if: ${{ inputs.enable-php-cs-fixer }}
+    name: Lint - PHP - PHP CS Fixer
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ inputs.php-cs-fixer-continue-on-error }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          extensions: '${{ inputs.php-extensions }}'
+          php-version: '${{ inputs.php-version }}'
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: "${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}"
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist
+
+      - run: composer require --dev friendsofphp/php-cs-fixer
+
+      - name: Lint - PHP - PHP CS Fixer
+        run: |
+          if ! test -f .php-cs-fixer.php || ! test -f .php-cs-fixer.dist.php; then EXTRA_ARGS=$(printf -- '--rules=@PhpCsFixer,@Symfony src/'); else EXTRA_ARGS=''; fi
+          vendor/bin/php-cs-fixer check --stop-on-violation --using-cache=no ${EXTRA_ARGS}
+
+  phpstan:
+    if: ${{ inputs.enable-phpstan }}
+    name: Analyse - PHP - PHPStan
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ inputs.phpstan-continue-on-error }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          extensions: '${{ inputs.php-extensions }}'
+          php-version: '${{ inputs.php-version }}'
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: "${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}"
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist
+
+      - run: composer require --dev phpstan/phpstan
+
+      - name: Analyse - PHP - PHPStan
+        run: |
+          if [ -f phpstan.neon ] || [ -f phpstan.neon.dist ] || [ -f phpstan.dist.neon ]; then
+            EXTRA_ARGS=''
+          else
+            EXTRA_ARGS=$(printf -- '--level 5 src/')
+          fi
+          vendor/bin/phpstan analyse --no-progress ${EXTRA_ARGS}
+
+  eslint:
+    if: ${{ inputs.enable-eslint }}
+    name: Lint - JavaScript - ESLint / semistandard
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ inputs.eslint-continue-on-error }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          cache: ${{ inputs.node-use-yarn && 'yarn' || 'npm' }}
+          node-version: '${{ inputs.node-version }}'
+
+      - name: Lint - JavaScript - ESLint / semistandard
+        run: |
+          if [ -f eslint.config.js ] || [ -f eslint.config.mjs ] || [ -f eslint.config.cjs ] || [ -f .eslintrc.js ] || [ -f .eslintrc.cjs ] || [ -f .eslintrc.yaml ] || [ -f .eslintrc.yml ] || [ -f .eslintrc.json ]; then
+            ${{ inputs.node-use-yarn && 'yarn run' || 'npx --yes' }} eslint
+          else
+            ${{ inputs.node-use-yarn && 'yarn add --dev' || 'npm install --save-dev' }} semistandard
+            ${{ inputs.node-use-yarn && 'yarn run' || 'npm exec' }} semistandard ${{ inputs.semistandard-file-paths }}
+          fi
